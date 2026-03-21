@@ -1,0 +1,3 @@
+military analyst	defense strategist	pacifist activist
+diplomat	foreign minister	isolationist
+economist	trade policy expert	nationalist politician

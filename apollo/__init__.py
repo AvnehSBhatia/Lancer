@@ -1,6 +1,6 @@
-"""Lancer: perspective-conditioned event prediction components."""
+"""Apollo: Actor-target Prediction through Personality-conditioned Large Likelihood Optimization."""
 
-from lancer.perspective_event_head import (
+from apollo.perspective_event_head import (
     BottleneckStack,
     MiniModel,
     MiniModelBank,

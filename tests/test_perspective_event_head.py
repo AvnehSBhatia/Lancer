@@ -1,6 +1,6 @@
 import torch
 
-from lancer.perspective_event_head import (
+from apollo.perspective_event_head import (
     BottleneckStack,
     MiniModelBank,
     PerspectiveEventHead,

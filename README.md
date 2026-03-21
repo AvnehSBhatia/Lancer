@@ -1,4 +1,4 @@
-# Lancer — Perspective-conditioned geopolitical event prediction
+# Apollo — Actor-target Prediction through Personality-conditioned Large Likelihood Optimization
 
 This repository implements pieces of the neural architecture described in **main (21).pdf** (*Perspective-Conditioned Geopolitical Event Prediction — A Full Architecture Specification*). The model predicts whether one real-world entity will take a meaningful action toward another (invasion, election, trade deal, etc.) as a **two-way probability**: chance the action happens, and chance it does not.
 
@@ -75,7 +75,7 @@ Three passes: **ℝᴺ → ℝ¹²⁸ → ℝᴺ** with **ReLU**, independent we
 | Piece | Status |
 |-------|--------|
 | Stages 1–4 (M, residual, Q/K, **ABDⱼ**) | Not in code yet — supply **C** and **abd** (your **ABDⱼ**) externally. |
-| Stages 5–8 | [`lancer/perspective_event_head.py`](lancer/perspective_event_head.py) — `PerspectiveEventHead`, `MiniModelBank`, `BottleneckStack`. |
+| Stages 5–8 | [`apollo/perspective_event_head.py`](apollo/perspective_event_head.py) — `PerspectiveEventHead`, `MiniModelBank`, `BottleneckStack`. |
 
 The head expects a personality bank **C** with shape **(N, p)** and a single fused vector **abd** with shape **(d,)**. If **d ≠ p**, a learned linear map aligns **abd** into ℝᵖ before the poll (see module docstring).
 
@@ -98,7 +98,7 @@ python -m pytest tests/ -v
 
 ```python
 import torch
-from lancer import PerspectiveEventHead
+from apollo import PerspectiveEventHead
 
 n, p, d = 8, 64, 32
 head = PerspectiveEventHead(n=n, p=p, d=d)

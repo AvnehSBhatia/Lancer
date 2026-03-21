@@ -127,6 +127,50 @@ def _load_model(path: Path = MODEL_PATH):
     return model
 
 
+def embed_entity(text: str) -> torch.Tensor:
+    """Public: embed entity string to (1, 64)."""
+    return _embed_entity(text)
+
+
+def embed_context(text: str) -> torch.Tensor:
+    """Public: embed context string to (1, 64)."""
+    return _embed_context(text)
+
+
+def embed_personality(text: str) -> torch.Tensor:
+    """Public: embed personality string to (1, 64)."""
+    return _embed_personality(text)
+
+
+def predict_from_embeddings(
+    a: torch.Tensor,      # (1, 64) or (64,)
+    b: torch.Tensor,      # (1, 64) or (64,)
+    ctx: torch.Tensor,    # (1, 64) or (64,)
+    pers: torch.Tensor,   # (1, 64) or (64,)
+    model_path: Optional[Path] = None,
+) -> PredictionResult:
+    """Run model with precomputed embeddings. No embedding step."""
+    model = _load_model(model_path or MODEL_PATH)
+    a = a.flatten().unsqueeze(0) if a.dim() == 1 else a
+    b = b.flatten().unsqueeze(0) if b.dim() == 1 else b
+    ctx = ctx.flatten().unsqueeze(0) if ctx.dim() == 1 else ctx
+    pers = pers.flatten().unsqueeze(0) if pers.dim() == 1 else pers
+    c = pers.unsqueeze(1)    # (1, 1, 64)
+    d_ctx = ctx.unsqueeze(1)  # (1, 1, 64)
+    with torch.no_grad():
+        out = model(a, b, c, d_ctx)
+    p_hat = out.p_hat[0, 0, :]
+    abn = out.abn[0, :]
+    cn = out.c_star[0, 0, :]
+    return PredictionResult(
+        prediction=p_hat,
+        abn=abn,
+        cn=cn,
+        invade_prob=p_hat[0].item(),
+        not_invade_prob=p_hat[1].item(),
+    )
+
+
 def predict(
     actor: str,
     receiver: str,

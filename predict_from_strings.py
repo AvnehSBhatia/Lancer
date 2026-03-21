@@ -22,9 +22,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import torch
+
+if TYPE_CHECKING:
+    import torch.nn as nn
 
 # Paths
 ENTITY_DIR = Path("entity_embeddings")
@@ -148,9 +151,13 @@ def predict_from_embeddings(
     ctx: torch.Tensor,    # (1, 64) or (64,)
     pers: torch.Tensor,   # (1, 64) or (64,)
     model_path: Optional[Path] = None,
+    model: Optional["nn.Module"] = None,
 ) -> PredictionResult:
-    """Run model with precomputed embeddings. No embedding step."""
-    model = _load_model(model_path or MODEL_PATH)
+    """Run model with precomputed embeddings. No embedding step.
+
+    Pass a pre-loaded ``model`` to avoid reloading weights on every call (e.g. ensemble loop).
+    """
+    m = model if model is not None else _load_model(model_path or MODEL_PATH)
     a = a.flatten().unsqueeze(0) if a.dim() == 1 else a
     b = b.flatten().unsqueeze(0) if b.dim() == 1 else b
     ctx = ctx.flatten().unsqueeze(0) if ctx.dim() == 1 else ctx
@@ -158,7 +165,7 @@ def predict_from_embeddings(
     c = pers.unsqueeze(1)    # (1, 1, 64)
     d_ctx = ctx.unsqueeze(1)  # (1, 1, 64)
     with torch.no_grad():
-        out = model(a, b, c, d_ctx)
+        out = m(a, b, c, d_ctx)
     p_hat = out.p_hat[0, 0, :]
     abn = out.abn[0, :]
     cn = out.c_star[0, 0, :]

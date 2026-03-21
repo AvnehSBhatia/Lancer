@@ -58,26 +58,18 @@ For each personality **i**:
 
 *(The PDF leaves the map to **p̂ᵢ** open; the implementation uses a small softmax head on **C*ᵢ**.)*
 
-### Stage 6 — Polling
+### Part 2 — Aggregation head (main (24).pdf)
 
-**v = ABDⱼ · Eᵀ** → **v ∈ ℝᴺ** (one score per personality for this situation).
-
-### Stage 7 — Bottleneck refinement
-
-Three passes: **ℝᴺ → ℝ¹²⁸ → ℝᴺ** with **ReLU**, independent weights per pass → **v⁽³⁾**.
-
-### Stage 8 — Output
-
-**ŷ = softmax(W_out v⁽³⁾)** with **ŷ = (ŷ⁺, ŷ⁻)**, **ŷ⁺ + ŷ⁻ = 1**.
+After Part 1, each mini-model has produced **p̂ᵢ**. Steps 6–8 build **E** from **Cᵢ** and **p̂ᵢ** (shared **w**, **b** sharpen; tanh confidence gate). Step 9 forms **ABDn = tanh(wD ⊙ ABn ⊙ Dn + bD)**. Step 10 polls **v = E @ ABDn**. Steps 11–12: three bottlenecks on **v**, then **ŷ = softmax(W_out v⁽³⁾)**.
 
 ## What this repo implements
 
 | Piece | Status |
 |-------|--------|
-| Stages 1–4 (M, residual, Q/K, **ABDⱼ**) | Not in code yet — supply **C** and **abd** (your **ABDⱼ**) externally. |
-| Stages 5–8 | [`apollo/perspective_event_head.py`](apollo/perspective_event_head.py) — `PerspectiveEventHead`, `MiniModelBank`, `BottleneckStack`. |
+| Part 1 (per mini-model, incl. **ABn**, **M′**, **p̂ᵢ**) | [`perspective_stages.py`](perspective_stages.py) — `Stages1to5` (differs slightly from main (24) on Step 5 wiring; see that module). |
+| Part 2 aggregation (Steps 6–12) | [`apollo/perspective_event_head.py`](apollo/perspective_event_head.py) — `PerspectiveEventHead`, `BottleneckStack`. |
 
-The head expects a personality bank **C** with shape **(N, p)** and a single fused vector **abd** with shape **(d,)**. If **d ≠ p**, a learned linear map aligns **abd** into ℝᵖ before the poll (see module docstring).
+The aggregation head expects **C** (N, p), Part 1 votes **p_hat** (N, 2), actor–receiver blend **ABn** (p,), and global context **Dn** (q,) with optional **Linear(q → p)** inside Step 9 when **q ≠ p**.
 
 ## Setup
 
@@ -100,11 +92,13 @@ python -m pytest tests/ -v
 import torch
 from apollo import PerspectiveEventHead
 
-n, p, d = 8, 64, 32
-head = PerspectiveEventHead(n=n, p=p, d=d)
+n, p, q = 8, 64, 64
+head = PerspectiveEventHead(n=n, p=p, q=q)
 C = torch.randn(n, p)
-abd = torch.randn(d)
-y = head(C, abd)  # shape (2,), nonnegative, sums to 1
+p_hat = torch.softmax(torch.randn(n, 2), dim=-1)
+abn = torch.randn(p)
+d_n = torch.randn(q)
+y = head(C, p_hat, abn, d_n)  # shape (2,), nonnegative, sums to 1
 ```
 
 ## Reference

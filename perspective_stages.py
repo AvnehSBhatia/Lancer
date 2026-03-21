@@ -237,6 +237,66 @@ class Stages1to5(nn.Module):
             p_hat          = p_hat,
         )
 
+    def forward_stage4_abdj(
+        self,
+        a: torch.Tensor,
+        b: torch.Tensor,
+        d_ctx: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Stage 4 only (spec / main PDF): ABn from actor–receiver, then per-slot fusion
+
+            ABD_j = tanh(w_j ⊙ ABn ⊙ proj(D_j) + b_j).
+
+        Does not run Stages 1–3 or 5 (no outer-product grid). Use this to build the
+        same ``abd`` vectors that Stages 6–8 consume as ``ABD_j`` (one row ``j``).
+
+        Parameters
+        ----------
+        a, b : (batch, d)
+        d_ctx : (batch, N, q)
+
+        Returns
+        -------
+        abdj : (batch, N, d)
+        """
+        cfg = self.cfg
+        N, eps = cfg.n, cfg.eps
+        if d_ctx.dim() != 3 or d_ctx.shape[0] != a.shape[0] or d_ctx.shape[1] != N:
+            raise ValueError(
+                f"Expected d_ctx (batch, {N}, q), got {tuple(d_ctx.shape)} "
+                f"with batch {a.shape[0]}"
+            )
+
+        a_norm = F.normalize(a, dim=-1, eps=eps)
+        b_norm = F.normalize(b, dim=-1, eps=eps)
+        cos_ab = (a_norm * b_norm).sum(dim=-1, keepdim=True)
+        abn = torch.tanh(a * (1.0 - cos_ab)) + torch.tanh(b * cos_ab)
+
+        d_proj = self.context_proj(d_ctx)
+        abn_exp = abn.unsqueeze(1).expand(-1, N, -1)
+        return torch.tanh(self.abd_w * abn_exp * d_proj + self.abd_b)
+
+
+def compute_abn(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Part 1 Step 2 (main (24).pdf): actor–receiver blend ``ABn`` in ``d``-space.
+
+    Parameters
+    ----------
+    a, b : (d,) or (batch, d)
+    """
+    squeeze = False
+    if a.dim() == 1:
+        squeeze = True
+        a = a.unsqueeze(0)
+        b = b.unsqueeze(0)
+    a_norm = F.normalize(a, dim=-1, eps=eps)
+    b_norm = F.normalize(b, dim=-1, eps=eps)
+    cos_ab = (a_norm * b_norm).sum(dim=-1, keepdim=True)
+    abn = torch.tanh(a * (1.0 - cos_ab)) + torch.tanh(b * cos_ab)
+    return abn.squeeze(0) if squeeze else abn
+
 
 # ─────────────────────────────────────────────────────────────────
 def build_model(cfg: Config) -> Stages1to5:

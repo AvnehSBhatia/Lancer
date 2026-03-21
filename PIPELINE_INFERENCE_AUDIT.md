@@ -1,12 +1,12 @@
-# Inference pipeline audit (`run_full_pipeline.py` → `predict_from_strings.py`)
+# Inference pipeline audit (`run_full_pipeline.py` → Part 1 + Part 2)
 
-This document lists **every project file** involved when `run_full_pipeline.py` runs **one** subprocess call to `predict_from_strings.py`, and states whether the path matches **main (23).pdf** (100 mini-models + aggregation head).
+This document lists **every project file** involved when [`run_full_pipeline.py`](run_full_pipeline.py) runs: **Part 1** — one [`Stages1to5`](perspective_stages.py) forward per vault personality (same `N=1` checkpoint); **Part 2** — [`PerspectiveEventHead`](apollo/perspective_event_head.py) once (main (24).pdf aggregation). **No training** in the runner.
 
 ## 1. Entrypoints
 
 | File | Role |
 |------|------|
-| [`run_full_pipeline.py`](run_full_pipeline.py) | Loops over all strings in [`personality_bank.PERSONALITY_BANK`](personality_bank.py) (100 from `personalities_100.json`). For each, runs `python predict_from_strings.py actor receiver context personality`. **No training.** |
+| [`run_full_pipeline.py`](run_full_pipeline.py) | In-process: pre-embeds actor/receiver/context; for each vault personality (or `--max-personalities` subsample), calls [`predict_from_embeddings`](predict_from_strings.py) with a **shared** loaded `Stages1to5`; stacks **raw** `C_i`, collects `p_hat`, builds `ABn` via [`compute_abn`](perspective_stages.py), runs [`PerspectiveEventHead`](apollo/perspective_event_head.py). Optional weights: `data/perspective_event_head.pt`. |
 | [`predict_from_strings.py`](predict_from_strings.py) | Loads embedders + checkpoint, runs **one** forward of [`perspective_stages.Stages1to5`](perspective_stages.py) with **N = 1**, returns `p_hat` for that single slot. |
 | [`personality_bank.py`](personality_bank.py) | Supplies the ordered list of 100 personality strings (vault JSON). |
 
@@ -17,7 +17,8 @@ This document lists **every project file** involved when `run_full_pipeline.py` 
 | [`entity_minilm_converter.py`](entity_minilm_converter.py) | `load_converter(ENTITY_DIR)` → trained linear maps + embedding table for entities. |
 | [`context_minilm_converter.py`](context_minilm_converter.py) | Same pattern for contexts. |
 | [`personality_minilm_converter.py`](personality_minilm_converter.py) | Same pattern for personalities. |
-| [`perspective_stages.py`](perspective_stages.py) | **`Stages1to5` only**: docstring Stages 1–5 (outer product grid, residual, Q/K projection, ABn/ABDj fusion, per-slot softmax + heads). **`build_model` = `Stages1to5`**, not Stages 6–8. |
+| [`perspective_stages.py`](perspective_stages.py) | **`Stages1to5` only**: docstring Stages 1–5 (outer product grid, residual, Q/K projection, ABn/ABDj fusion, per-slot softmax + heads). **`build_model` = `Stages1to5`**, not Part 2. Also **`compute_abn`** for PDF **ABn**. |
+| [`apollo/perspective_event_head.py`](apollo/perspective_event_head.py) | **Part 2** (main (24).pdf Steps 6–12): `PerspectiveEventHead`. |
 
 ## 3. On-disk artifacts (must exist from prior training)
 
@@ -33,6 +34,7 @@ This document lists **every project file** involved when `run_full_pipeline.py` 
 | `personality_embeddings/personality_embeddings.pt` | |
 | `personality_embeddings/converter_ours_minilm.pt` | |
 | `data/perspective_stages.pt` | Weights for `Stages1to5` (`Config(n=1,…)` must match [`predict_from_strings`](predict_from_strings.py) and [`train_perspective_stages`](train_perspective_stages.py)). |
+| `data/perspective_event_head.pt` | Optional. Weights for [`PerspectiveEventHead`](apollo/perspective_event_head.py) (Part 2). If missing, `run_full_pipeline.py` uses a random-init head. |
 
 ## 4. External packages (runtime)
 

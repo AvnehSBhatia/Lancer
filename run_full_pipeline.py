@@ -1,28 +1,45 @@
 """
-Inference-only runner: precomputes all embeddings, then runs model per personality.
+End-to-end inference aligned with main (24).pdf (Part 1 sweep + Part 2 aggregation).
 
-Actor, receiver, context embedded once. Personalities evenly sampled and preembedded.
+Part 1 — For each vault personality i: embed (sA, sB, sC_i, sD) with the same global
+context sD, run ``Stages1to5`` (``N=1`` checkpoint) → ``p_hat_i`` (repo’s Step 5 wiring).
 
-Usage: python run_full_pipeline.py
+Part 2 — Stack raw personality embeddings ``C_i ∈ R^64`` as ``C`` (N, p), collect
+``p_hat`` (N, 2), form ``ABn`` from (A, B) via ``compute_abn``, take ``D_n`` from
+context embedding, run ``PerspectiveEventHead`` once → ``[y+, y-]`` (final action
+probability vs not).
+
+Weights:
+  - ``data/perspective_stages.pt`` — Part 1 (existing).
+  - ``data/perspective_event_head.pt`` — Part 2 (optional; random init if missing).
+
+Usage (from repo root):
+    python run_full_pipeline.py
+    python run_full_pipeline.py --max-personalities 20
+    python run_full_pipeline.py --agg-head path/to/perspective_event_head.pt
 """
 
 from __future__ import annotations
 
+import argparse
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+import torch
 
-# ── Hardcoded inputs ────────────────────────────────────────────────────────
-actor = "United States of America"
-iraq = "Iraq"
-context = (
+ROOT = Path(__file__).resolve().parent
+DEFAULT_AGG_HEAD = ROOT / "data" / "perspective_event_head.pt"
+
+P_DIM = 64
+Q_DIM = 64
+
+DEFAULT_ACTOR = "United States of America"
+DEFAULT_RECEIVER = "Iraq"
+DEFAULT_CONTEXT = (
     "Year 2003. United States of America CINC score 0.1518, "
     "United Arab Emirates CINC score 0.0022. No active dispute between "
     "United States of America and United Arab Emirates. No alliance. Bilateral trade volume: 0.006."
 )
-MAX_PERSONALITIES = 100  # evenly sample this many from vault; None = use all 100
-QUIET = False
 
 
 def _evenly_sample(lst: list, k: int) -> list:
@@ -30,73 +47,122 @@ def _evenly_sample(lst: list, k: int) -> list:
     n = len(lst)
     if k >= n:
         return list(lst)
-    indices = [int(i * (n - 1) / (k - 1)) for i in range(k)] if k > 1 else [0]
+    if k < 1:
+        return []
+    indices = [int(round(i * (n - 1) / (k - 1))) for i in range(k)] if k > 1 else [0]
     return [lst[i] for i in indices]
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="main (24).pdf: Part 1 × N + Part 2 aggregation.")
+    parser.add_argument("--actor", default=DEFAULT_ACTOR)
+    parser.add_argument("--receiver", default=DEFAULT_RECEIVER)
+    parser.add_argument("--context", default=DEFAULT_CONTEXT)
+    parser.add_argument(
+        "--max-personalities",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Evenly subsample K vault personalities; default = all.",
+    )
+    parser.add_argument(
+        "--agg-head",
+        type=Path,
+        default=DEFAULT_AGG_HEAD,
+        help="PerspectiveEventHead state_dict (.pt); optional.",
+    )
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args()
+
+    from apollo.perspective_event_head import PerspectiveEventHead
     from personality_bank import PERSONALITY_BANK
+    from perspective_stages import compute_abn
     from predict_from_strings import (
+        MODEL_PATH,
+        _load_model,
         embed_context,
         embed_entity,
         embed_personality,
         predict_from_embeddings,
     )
 
-    # ── All 4 inputs at top ─────────────────────────────────────────────────
     all_personalities = list(PERSONALITY_BANK)
-    k = max(1, MAX_PERSONALITIES) if MAX_PERSONALITIES else len(all_personalities)
-    personality = _evenly_sample(all_personalities, k)
-
-    # ── Precompute all embeddings ───────────────────────────────────────────
-    t_start = time.perf_counter()
-
-    a_emb = embed_entity(actor)           # (1, 64)
-    b_emb = embed_entity(iraq)            # (1, 64)
-    ctx_emb = embed_context(context)      # (1, 64)
-    pers_embs = [embed_personality(s) for s in personality]  # list of (1, 64)
+    if args.max_personalities is None:
+        personality = all_personalities
+    else:
+        k = max(1, min(args.max_personalities, len(all_personalities)))
+        personality = _evenly_sample(all_personalities, k)
 
     n = len(personality)
-    if not QUIET:
-        print(f"Working directory: {ROOT}")
-        print(f"Precomputed: actor, iraq, context, {n} personalities")
-        print(f"Running {n} model forwards")
-        print("=" * 70)
+    if n == 0:
+        raise SystemExit("No personalities selected.")
 
-    results = []
-    for i, (pers_str, pers_emb) in enumerate(zip(personality, pers_embs)):
+    stages = _load_model(MODEL_PATH)
+
+    t_start = time.perf_counter()
+
+    a_emb = embed_entity(args.actor)
+    b_emb = embed_entity(args.receiver)
+    ctx_emb = embed_context(args.context)
+
+    pers_embs = [embed_personality(s) for s in personality]
+
+    # Part 2 Step 6 uses raw personality embeddings C_i (main (24).pdf notation).
+    C = torch.stack([p.flatten() for p in pers_embs], dim=0)
+
+    p_hat_rows: list[torch.Tensor] = []
+    for pers_str, pers_t in zip(personality, pers_embs):
         try:
-            r = predict_from_embeddings(a_emb, b_emb, ctx_emb, pers_emb)
-            results.append((pers_str, r))
+            r = predict_from_embeddings(
+                a_emb, b_emb, ctx_emb, pers_t, model=stages
+            )
+            p_hat_rows.append(r.prediction.detach())
         except Exception as e:
-            if not QUIET:
-                print(f"[{i + 1}/{n}] FAILED: {pers_str[:60]}... -> {e}")
-            results.append((pers_str, None))
+            if not args.quiet:
+                print(f"FAILED Part 1: {pers_str[:60]}... -> {e}")
+            raise
 
-        if not QUIET:
-            p = results[-1][1]
-            if p is not None:
-                inv = f"{p.invade_prob:.3f}"
-                noinv = f"{p.not_invade_prob:.3f}"
-                print(f"[{i + 1}/{n}] {pers_str[:60]}{'...' if len(pers_str) > 60 else ''}")
-                print(f"  P(invade)={inv}  P(not)={noinv}")
+    p_hat = torch.stack(p_hat_rows, dim=0)
+
+    abn = compute_abn(a_emb.flatten(), b_emb.flatten())
+    d_n = ctx_emb.flatten()
+
+    head = PerspectiveEventHead(n=n, p=P_DIM, q=Q_DIM)
+    if args.agg_head.is_file():
+        head.load_state_dict(torch.load(args.agg_head, weights_only=True))
+        if not args.quiet:
+            print(f"Loaded aggregation head: {args.agg_head}")
+    else:
+        if not args.quiet:
+            print(
+                f"Warning: no aggregation checkpoint at {args.agg_head}; "
+                "Part 2 uses random weights (train or add perspective_event_head.pt)."
+            )
+    head.eval()
+
+    with torch.no_grad():
+        y = head(C, p_hat, abn, d_n)
 
     elapsed = time.perf_counter() - t_start
-    failures = sum(1 for _, r in results if r is None)
 
-    if not QUIET:
-        print()
+    if not args.quiet:
+        print(f"Working directory: {ROOT}")
+        print(f"Part 1: {n} forwards (Stages1to5), Part 2: PerspectiveEventHead (main (24).pdf)")
+        print("=" * 70)
+        for i, pers_str in enumerate(personality):
+            ph = p_hat[i]
+            print(
+                f"[{i + 1}/{n}] {pers_str[:56]}{'...' if len(pers_str) > 56 else ''}  "
+                f"p_hat=({ph[0]:.3f},{ph[1]:.3f})"
+            )
         print("=" * 70)
 
-    print(f"Full pipeline: precompute + {n} model forwards")
-    print(f"  Total: {elapsed:.2f} s")
-    print(f"  Per run: {elapsed/n*1000:.2f} ms")
-    print(f"  Throughput: {n/elapsed:.0f} predictions/sec")
-    if failures:
-        print(f"  Failures: {failures}/{n}")
-
-    if failures:
-        raise SystemExit(f"Finished with {failures} failed run(s) out of {n}.")
+    yp, ym = y[0].item(), y[1].item()
+    print(f"Aggregated y (Part 2):  y_plus={yp:.4f}  y_minus={ym:.4f}")
+    print(
+        f"Timing: {elapsed:.2f} s total, {elapsed / n * 1000:.1f} ms per Part-1 forward "
+        f"({n / elapsed:.1f} mini-models/s)"
+    )
 
 
 if __name__ == "__main__":

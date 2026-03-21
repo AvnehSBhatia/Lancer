@@ -1,0 +1,11 @@
+{
+  "defense strategist": 0,
+  "diplomat": 1,
+  "economist": 2,
+  "foreign minister": 3,
+  "isolationist": 4,
+  "military analyst": 5,
+  "nationalist politician": 6,
+  "pacifist activist": 7,
+  "trade policy expert": 8
+}

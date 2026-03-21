@@ -1,0 +1,5 @@
+{
+  "entity_dim": 64,
+  "minilm_dim": 384,
+  "vocab_path": "vocab.json"
+}

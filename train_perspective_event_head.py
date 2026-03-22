@@ -29,12 +29,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train PerspectiveEventHead on built .pt data.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA, help="Training .pt path.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUT, help="Save state_dict here.")
-    parser.add_argument("--epochs", type=int, default=120)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=400)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None, help="cuda | cpu (default: auto).")
+    parser.add_argument("--val-frac", type=float, default=0.1, help="Fraction of data for validation.")
     args = parser.parse_args()
 
     if not args.data.is_file():
@@ -72,6 +73,13 @@ def main() -> None:
     if y_class.shape != (M,):
         raise ValueError("y_class must be (M,)")
 
+    # Train/val split
+    perm = torch.randperm(M, generator=torch.Generator().manual_seed(args.seed))
+    n_val = max(1, int(M * args.val_frac))
+    val_idx = perm[:n_val]
+    train_idx = perm[n_val:]
+    M_train = len(train_idx)
+
     model = PerspectiveEventHead(n=n, p=p_dim, q=q_dim).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     crit = nn.CrossEntropyLoss()
@@ -79,16 +87,17 @@ def main() -> None:
     C_bank_d = C_bank.to(device)
 
     print(f"Device: {device}")
-    print(f"Samples: {M}, N={n}, p={p_dim}, q={q_dim}, batches/epoch: {(M + args.batch_size - 1) // args.batch_size}")
+    print(f"Samples: {M} (train {M_train}, val {n_val}) N={n} p={p_dim} q={q_dim}")
 
     for epoch in range(args.epochs):
         model.train()
-        perm = torch.randperm(M)
+        train_perm = torch.randperm(M_train)
         total_loss = 0.0
         correct = 0
         n_seen = 0
-        for start in range(0, M, args.batch_size):
-            idx = perm[start : start + args.batch_size]
+        for start in range(0, M_train, args.batch_size):
+            batch_idx = train_perm[start : start + args.batch_size]
+            idx = train_idx[batch_idx]
             B = idx.shape[0]
             C_b = C_bank_d.unsqueeze(0).expand(B, -1, -1)
             ph = p_hat[idx].to(device)
@@ -106,8 +115,24 @@ def main() -> None:
             correct += (logits.argmax(dim=-1) == y).sum().item()
             n_seen += B
 
-        acc = correct / max(n_seen, 1)
-        print(f"epoch {epoch + 1}/{args.epochs}  loss={total_loss / n_seen:.4f}  acc={acc:.4f}")
+        train_acc = correct / max(n_seen, 1)
+
+        model.eval()
+        with torch.no_grad():
+            val_correct = 0
+            for start in range(0, n_val, args.batch_size):
+                idx = val_idx[start : start + args.batch_size]
+                B = idx.shape[0]
+                C_b = C_bank_d.unsqueeze(0).expand(B, -1, -1)
+                ph = p_hat[idx].to(device)
+                a = abn[idx].to(device)
+                d = d_n[idx].to(device)
+                y = y_class[idx].to(device)
+                logits = model.forward_logits(C_b, ph, a, d)
+                val_correct += (logits.argmax(dim=-1) == y).sum().item()
+        val_acc = val_correct / n_val
+
+        print(f"epoch {epoch + 1}/{args.epochs}  loss={total_loss / n_seen:.4f}  train_acc={train_acc:.4f}  val_acc={val_acc:.4f}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), args.output)

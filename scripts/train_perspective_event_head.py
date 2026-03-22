@@ -4,7 +4,8 @@ train_perspective_event_head.py
 Trains ``PerspectiveEventHead`` (main (24).pdf Part 2) on tensors from
 ``build_perspective_event_head_training_data.py``.
 
-Expects a .pt with: C_bank (N,p), p_hat (M,N,2), abn (M,p), d_n (M,q), y_class (M,) long.
+Expects a .pt with: C_bank (N,p), p_hat (M,N,2), abn (M,p), d_n (M,q), y_class (M,).
+Labels: 0 = it happened [1,0], 1 = it did not happen [0,1].
 
 Usage:
     python scripts/build_perspective_event_head_training_data.py --num-samples 50000
@@ -37,7 +38,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUT, help="Save state_dict here.")
     parser.add_argument("--epochs", type=int, default=400)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None, help="cuda | cpu (default: auto).")
@@ -86,9 +87,9 @@ def main() -> None:
     train_idx = perm[n_val:]
     M_train = len(train_idx)
 
-    model = PerspectiveEventHead(n=n, p=p_dim, q=q_dim).to(device)
+    model = PerspectiveEventHead(n=n, p=p_dim, q=q_dim, use_bottleneck=False).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    crit = nn.CrossEntropyLoss()
+    crit = nn.CrossEntropyLoss()  # y_class 0 → [1,0] happened; 1 → [0,1] did not
 
     C_bank_d = C_bank.to(device)
 

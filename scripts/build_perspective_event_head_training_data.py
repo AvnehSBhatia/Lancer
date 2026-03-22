@@ -11,7 +11,7 @@ main (24).pdf Part 2 (aggregation Steps 6-12 inputs):
   - ``abn`` (M, p): actor-receiver blend (Part 1 Step 2 / Part 2 Step 9 input).
   - ``d_n`` (M, q): **global** context embedding ``D_n`` for Step 9 (same string space
     as Part 1 ``sD`` after the context converter).
-  - ``y_class`` / ``y``: final head targets; class 0 = ``y+`` (hostile / action), 1 = ``y-``.
+  - ``y_class`` / ``y``: targets. class 0 = it happened → [1,0]; class 1 = it did not → [0,1].
 
 ``ABDn = tanh(wD * ABn * Dn + bD)`` is **not** precomputed; the head learns ``wD, bD``.
 
@@ -314,8 +314,8 @@ def main() -> None:
         if offset % max(args.batch_size * 50, 1) == 0 or offset >= M:
             print(f"  ... {offset}/{M}")
 
-    n_plus = int((y_class == 0).sum().item())
-    print(f"  Class 0 (y_plus / hostile): {n_plus} ({100.0 * n_plus / M:.1f}%)")
+    n_happened = int((y_class == 0).sum().item())
+    print(f"  It happened [1,0]: {n_happened} ({100.0 * n_happened / M:.1f}%)")
 
     y_one_hot = torch.zeros(M, 2)
     y_one_hot[torch.arange(M), y_class] = 1.0
@@ -333,7 +333,7 @@ def main() -> None:
         "num_samples": M,
         "label_mode": args.label_mode,
         "spec_reference": "main (24).pdf Part 2 Steps 6-12; p_hat is random stand-in for Part 1 Step 5.",
-        "y_semantics": "class 0 = y_plus (hostile/action); class 1 = y_minus.",
+        "y_semantics": "class 0 = it happened → [1,0]; class 1 = it did not happen → [0,1].",
         "personality_names": list(personality_names),
     }
     if args.label_mode == "mid":

@@ -14,9 +14,16 @@ Weights:
   - ``data/perspective_event_head.pt`` — Part 2 (optional; random init if missing).
 
 Usage (from repo root):
+<<<<<<< Updated upstream:scripts/run_full_pipeline.py
     python scripts/run_full_pipeline.py
     python scripts/run_full_pipeline.py --max-personalities 20
     python scripts/run_full_pipeline.py --agg-head path/to/perspective_event_head.pt
+=======
+    python run_full_pipeline.py
+    python run_full_pipeline.py --max-personalities 20
+    python run_full_pipeline.py --agg-head path/to/perspective_event_head.pt
+    python run_full_pipeline.py --summary  # add Featherless AI summary (needs FEATHERLESS_API_KEY)
+>>>>>>> Stashed changes:run_full_pipeline.py
 """
 
 from __future__ import annotations
@@ -78,6 +85,11 @@ def main() -> None:
         help="PerspectiveEventHead state_dict (.pt); optional.",
     )
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Generate natural-language summary via Featherless AI (requires FEATHERLESS_API_KEY).",
+    )
     args = parser.parse_args()
 
     from apollo.perspective_event_head import PerspectiveEventHead
@@ -169,6 +181,24 @@ def main() -> None:
         f"Timing: {elapsed:.2f} s total, {elapsed / n * 1000:.1f} ms per Part-1 forward "
         f"({n / elapsed:.1f} mini-models/s)"
     )
+
+    if args.summary:
+        from generate_summary import generate_summary
+
+        try:
+            summary = generate_summary(
+                actor=args.actor,
+                receiver=args.receiver,
+                context=args.context,
+                y_plus=yp,
+                y_minus=ym,
+            )
+            print("\n" + "=" * 70)
+            print("Summary (Featherless AI):")
+            print(summary)
+        except Exception as e:
+            if not args.quiet:
+                print(f"\nSummary generation failed: {e}")
 
 
 if __name__ == "__main__":

@@ -68,6 +68,7 @@ class PerspectiveEventHead(nn.Module):
         n: int,
         p: int,
         q: int | None = None,
+        use_bottleneck: bool = False,
         bottleneck_hidden: int = 128,
     ) -> None:
         super().__init__()
@@ -76,6 +77,7 @@ class PerspectiveEventHead(nn.Module):
         self.n = n
         self.p = p
         self.q = q if q is not None else p
+        self.use_bottleneck = use_bottleneck
         # Step 6(b): shared across all personalities
         self.w_sharp = nn.Parameter(torch.ones(p))
         self.b_sharp = nn.Parameter(torch.zeros(p))
@@ -83,7 +85,7 @@ class PerspectiveEventHead(nn.Module):
         self.w_d = nn.Parameter(torch.ones(p))
         self.b_d = nn.Parameter(torch.zeros(p))
         self.context_proj = nn.Linear(self.q, p) if self.q != p else None
-        self.bottleneck = BottleneckStack(n, hidden=bottleneck_hidden)
+        self.bottleneck = BottleneckStack(n, hidden=bottleneck_hidden) if use_bottleneck else None
         self.W_out = nn.Linear(n, 2)
 
     def _project_d(self, d_n: Tensor) -> Tensor:
@@ -165,7 +167,7 @@ class PerspectiveEventHead(nn.Module):
         E = self.build_E(C, p_hat)
         abdn = self.fuse_abdn(abn, d_n)
         v = torch.einsum("bnp,bp->bn", E, abdn)
-        v3 = self.bottleneck(v)
+        v3 = self.bottleneck(v) if self.bottleneck is not None else v
         return self.W_out(v3)
 
     def _forward_batched(
@@ -203,7 +205,7 @@ class PerspectiveEventHead(nn.Module):
     ) -> Tensor:
         E = self.build_E(C, p_hat)
         v = torch.einsum("bnp,bp->bn", E, abdn)
-        v3 = self.bottleneck(v)
+        v3 = self.bottleneck(v) if self.bottleneck is not None else v
         return F.softmax(self.W_out(v3), dim=-1)
 
     def forward_all_contexts(

@@ -1,3 +1,6 @@
 torch
 sentence-transformers
 pytest
+flask
+flask-cors
+openai

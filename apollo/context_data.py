@@ -224,3 +224,50 @@ def get_available_pairs_years() -> set[tuple[int, int, int]]:
             if (c1, yr) in _nmc and (c2, yr) in _nmc:
                 pairs.add((c1, c2, yr))
     return pairs
+
+
+def build_context_string(year: int, country_a: int, country_b: int, max_words: int = 100) -> str:
+    """
+    Assembles a context string for (country_a, country_b, year).
+    country_a, country_b are COW ccodes.
+    """
+    _ensure_loaded()
+    parts = []
+    na = ccode_to_name(country_a)
+    nb = ccode_to_name(country_b)
+
+    parts.append(f"Year {year}. ")
+
+    a_caps = get_capabilities(country_a, year)
+    b_caps = get_capabilities(country_b, year)
+    if a_caps is not None and b_caps is not None:
+        parts.append(f"{na} CINC score {a_caps['cinc']:.4f}, {nb} CINC score {b_caps['cinc']:.4f}. ")
+    else:
+        parts.append(f"{na} and {nb}. ")
+
+    a_b_mid = check_mid_between(country_a, country_b, year)
+    if a_b_mid is not None:
+        parts.append(f"Active dispute between {na} and {nb}, hostility level {a_b_mid[0]}. ")
+    else:
+        parts.append(f"No active dispute between {na} and {nb}. ")
+
+    a_all = get_alliances(country_a, year)
+    shared_types = [t for p, t in a_all if p == country_b]
+    if shared_types:
+        parts.append(f"{na} and {nb} share {shared_types[0]} alliance. ")
+    else:
+        parts.append(f"No alliance between {na} and {nb}. ")
+
+    active_wars = get_active_wars(year)
+    if active_wars:
+        parts.append(f"Active wars in {year}: {len(active_wars)} ongoing. ")
+
+    trade = get_bilateral_trade(country_a, country_b, year)
+    parts.append(f"Bilateral trade volume: {trade:.3f}. ")
+
+    dip = get_diplomatic_level(country_a, country_b, year)
+    parts.append(f"Diplomatic relations: {dip}. ")
+
+    s = "".join(parts)
+    words = s.split()[:max_words]
+    return " ".join(words)

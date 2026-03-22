@@ -19,8 +19,8 @@ Requires: entity_embeddings/, context_embeddings/, personality_embeddings/; vaul
 personalities in personality vocab.
 
 Usage:
-    python build_perspective_event_head_training_data.py --num-samples 100000
-    python build_perspective_event_head_training_data.py --label-mode mid --mid-csv data/dyadic_mid_4.02.csv
+    python scripts/build_perspective_event_head_training_data.py --num-samples 100000
+    python scripts/build_perspective_event_head_training_data.py --label-mode mid --mid-csv data/dyadic_mid_4.02.csv
 """
 
 from __future__ import annotations
@@ -30,18 +30,25 @@ import csv
 import json
 import os
 import random
+import sys
 from pathlib import Path
 
 import torch
 
-from perspective_stages import compute_abn
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-# ── Paths ─────────────────────────────────────────────────────────
-ENTITY_DIR = Path("entity_embeddings")
-CONTEXT_DIR = Path("context_embeddings")
-PERSONALITY_DIR = Path("personality_embeddings")
-DEFAULT_MID_CSV = Path("data/dyadic_mid_4.02.csv")
-OUTPUT_DIR = Path("data")
+from apollo.paths import (
+    CONTEXT_EMBEDDINGS_DIR as CONTEXT_DIR,
+    DATA_DIR,
+    ENTITY_EMBEDDINGS_DIR as ENTITY_DIR,
+    PERSONALITY_EMBEDDINGS_DIR as PERSONALITY_DIR,
+)
+from apollo.perspective_stages import compute_abn
+
+DEFAULT_MID_CSV = DATA_DIR / "dyadic_mid_4.02.csv"
+OUTPUT_DIR = DATA_DIR
 DEFAULT_OUT = OUTPUT_DIR / "perspective_event_head_training.pt"
 
 P = 64
@@ -130,7 +137,7 @@ def _build_C_bank(personality_names: tuple[str, ...], pers_embs: dict[str, torch
         raise KeyError(
             "Personality strings missing from personality_embeddings vocab "
             f"(first 5): {missing[:5]}. Run build_personalities_txt_from_vault.py "
-            "and train_personality_embeddings.py."
+            "and scripts/train_personality_embeddings.py."
         )
     return torch.stack(rows, dim=0)
 
@@ -191,7 +198,7 @@ def main() -> None:
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    from personality_bank import PERSONALITY_BANK
+    from apollo.personality_bank import PERSONALITY_BANK
 
     personality_names = tuple(PERSONALITY_BANK)
     n = len(personality_names)

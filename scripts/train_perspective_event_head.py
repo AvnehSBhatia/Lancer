@@ -7,22 +7,28 @@ Trains ``PerspectiveEventHead`` (main (24).pdf Part 2) on tensors from
 Expects a .pt with: C_bank (N,p), p_hat (M,N,2), abn (M,p), d_n (M,q), y_class (M,) long.
 
 Usage:
-    python build_perspective_event_head_training_data.py --num-samples 50000
-    python train_perspective_event_head.py
+    python scripts/build_perspective_event_head_training_data.py --num-samples 50000
+    python scripts/train_perspective_event_head.py
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 
-from apollo.perspective_event_head import PerspectiveEventHead
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-DEFAULT_DATA = Path("data/perspective_event_head_training.pt")
-DEFAULT_OUT = Path("data/perspective_event_head.pt")
+from apollo.perspective_event_head import PerspectiveEventHead
+from apollo.paths import PERSPECTIVE_EVENT_HEAD_PT, PERSPECTIVE_EVENT_HEAD_TRAINING_PT
+
+DEFAULT_DATA = PERSPECTIVE_EVENT_HEAD_TRAINING_PT
+DEFAULT_OUT = PERSPECTIVE_EVENT_HEAD_PT
 
 
 def main() -> None:
@@ -40,7 +46,7 @@ def main() -> None:
 
     if not args.data.is_file():
         raise SystemExit(
-            f"Missing {args.data}. Run: python build_perspective_event_head_training_data.py"
+            f"Missing {args.data}. Run: python scripts/build_perspective_event_head_training_data.py"
         )
 
     torch.manual_seed(args.seed)

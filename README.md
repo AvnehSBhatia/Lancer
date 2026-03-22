@@ -1,75 +1,128 @@
-# Apollo — Actor-target Prediction through Personality-conditioned Large Likelihood Optimization
+# Apollo / Lancer — Perspective-Conditioned Geopolitical Event Prediction
 
-This repository implements pieces of the neural architecture described in **main (21).pdf** (*Perspective-Conditioned Geopolitical Event Prediction — A Full Architecture Specification*). The model predicts whether one real-world entity will take a meaningful action toward another (invasion, election, trade deal, etc.) as a **two-way probability**: chance the action happens, and chance it does not.
+This repository implements components of the architecture in **main (24).pdf** (*Perspective-Conditioned Geopolitical Event Prediction — Complete Architecture Specification*). The confirmed spec describes **100 independent mini-models** (each with its own weights), followed by **one aggregation head** that outputs a single binary distribution **[ŷ⁺, ŷ⁻]** (action toward B vs. not).
 
-## Core ideas
+Place **main (24).pdf** alongside this README for full detail; the sections below mirror its structure.
 
-1. **No single predictor.** The network runs **N independent sub-models**, one per learned **personality perspective** (e.g. military vs. diplomatic vs. economic “lens”). Each casts a vote; votes are aggregated.
-2. **Global context.** Every prediction is conditioned on **N context vectors** that summarize slices of the current world state. The same actor–target pair can look different under famine, elections, or crisis.
-3. **Three separate embedding spaces.** Actor/target share one space; personality vectors live in another; context vectors in a third. Distances in actor–target space carry geometric meaning; personalities and contexts are not confused with “looking like a country.”
+---
 
-## The four inputs (each forward pass)
+## Abstract (spec)
 
-| Symbol | Space | Meaning |
-|--------|--------|---------|
-| **A** | ℝ^d | Actor — who might act (e.g. a government, a public figure). |
-| **B** | ℝ^d | Target — who the action would be directed at. |
-| **Cᵢ** | ℝ^p | One of **N** personality vectors (analytical perspectives). |
-| **Dⱼ** | ℝ^q | One of **N** context vectors (global situation slices). |
+- Each mini-model takes **four English strings**, embeds them with **MiniLM-v2** and learned **64-dimensional converters**, and outputs **[p̂⁺, p̂⁻]**.
+- The **aggregation head** runs **once** after all mini-models, combining **personality vectors** and **votes** into **[ŷ⁺, ŷ⁻]**.
 
-**N** is a hyperparameter (same count for personalities and contexts in the spec). Dimensions **d**, **p**, **q** are fixed by design.
+---
 
-## Pipeline (stages in the PDF)
+## Part 1 — The mini-model (runs N times; N = 100 in the PDF)
 
-### Stage 1 — Personality–context matrix **M**
+Each run uses **independent parameters** in the full spec (**no weight sharing** between mini-models). Mini-model **i** consumes **(sA, sB, sCi, sDi)**.
 
-All pairs (personality **i**, context **j**) are combined as an outer product:
+### Step 1 — Strings and embedding
 
-**Mᵢⱼ = Cᵢ ⊗ Dⱼ**
+| Input | Role |
+|--------|------|
+| **sA**, **sB** | Actor and target entities (shared **entity** converter). |
+| **sCi** | Personality string for lens **i** (**personality** converter). |
+| **sDi** | Context string for lens **i** (**context** converter). |
 
-Stacked, **M** is **N×N** (each cell is a matrix block; the spec treats the structure as an **N×N** grid of such combinations).
+Pipeline per string: **s → MiniLM-v2 → z ∈ ℝ³⁸⁴ → converter_k → e ∈ ℝ⁶⁴**. MiniLM is frozen; each converter is a learned two-layer MLP (triplet-trained). **Entity** space is shared by **A** and **B** so **cosine similarity between A and B is meaningful**.
 
-### Stage 2 — Residual refinement
+### Step 2 — Actor–receiver blend **ABn**
 
-Three passes refine **M** without destroying the original signal:
+- **cos_AB = (A·B) / (‖A‖‖B‖)** ∈ [−1, 1]
+- **ABn = tanh(A ⊙ (1 − cos_AB)) + tanh(B ⊙ cos_AB)** ∈ ℝ⁶⁴  
+  (actor-weighted when A and B differ; receiver-weighted when they align.)
 
-**M⁽ᵗ⁾ = α·M⁽ᵗ⁻¹⁾ + B + M⁽ᵗ⁻¹⁾**  →  **M′**
+### Step 3 — Outer product **M**
 
-**α** is one shared scalar; **B** is a learned **N×N** bias (one bias per cell). After three passes: **M′**.
+**M = C ⊗ D ∈ ℝ⁶⁴ˣ⁶⁴** (one **64×64** block per mini-model from its **Cᵢ** and **Dᵢ**).
 
-### Stage 3 — Projection into actor–target space
+### Step 4 — Residual refinement (×3)
 
-**Q = W_Q M′**, **K = W_K M′**, with **W_Q**, **W_K ∈ ℝᵈˣᴺ**, yielding **Q**, **K ∈ ℝᵈˣᴺ** (columns live in the same **d**-space as **A** and **B**).
+**M⁽ᵗ⁾ = (1 + α) M⁽ᵗ⁻¹⁾ + B**, **t = 1,2,3**  
+**α ∈ ℝ** shared; **B ∈ ℝ⁶⁴ˣ⁶⁴** per-cell learned bias. Result **M′**.
 
-### Stage 4 — Blend actor and target, then fuse context
+### Step 5 — Collapse to **p̂ᵢ**
 
-- **cos_AB = (A·B) / (‖A‖‖B‖)** in **[-1, 1]**.
-- Blended vector **ABₙ** mixes **A** and **B** using **tanh** and **cos_AB** (when actors are similar, **B** dominates; when dissimilar, **A** dominates).
-- For each context **j**: **ABDⱼ = tanh(wⱼ ⊙ ABₙ ⊙ Dⱼ + bⱼ)** (element-wise; learned **wⱼ**, **bⱼ** per context).
+**h = M′ · ABn ∈ ℝ⁶⁴** (matrix–vector product treating **ABn** as a column).  
+**p̂ᵢ = softmax(W_out⁽ⁱ⁾ h + b_out⁽ⁱ⁾) ∈ ℝ²** with **W_out⁽ⁱ⁾ ∈ ℝ²ˣ⁶⁴**.  
+Output **p̂ᵢ = [p̂⁺, p̂⁻]**, **p̂⁺ + p̂⁻ = 1**.
 
-### Stage 5 — N mini-models → ensemble matrix **E**
+---
 
-For each personality **i**:
+## Part 2 — Aggregation head (runs once)
 
-1. **C̃ᵢ = softmax(N · Cᵢ)**
-2. **C*ᵢ = ReLU(Wᵢ⁽¹⁾ C̃ᵢ + bᵢ⁽¹⁾)** (weights unique per **i**)
-3. Confidence **p̂ᵢ** (two probabilities) gates **C*ᵢ** via **tanh** terms → row **C″ᵢ**
-4. Rows stack to **E ∈ ℝᴺˣᵖ**
+Inputs: all **{Cᵢ, p̂ᵢ}**, plus **global ABn** and **global Dn** for the situation (spec Step 9).
 
-*(The PDF leaves the map to **p̂ᵢ** open; the implementation uses a small softmax head on **C*ᵢ**.)*
+### Step 6 — Sharpen personalities
 
-### Part 2 — Aggregation head (main (24).pdf)
+- **C̃ᵢ = softmax(N · Cᵢ)** (PDF uses **N = 100** before softmax.)
+- **C′ᵢ = w ⊙ C̃ᵢ + b** with **shared** **w, b ∈ ℝ⁶⁴**.
 
-After Part 1, each mini-model has produced **p̂ᵢ**. Steps 6–8 build **E** from **Cᵢ** and **p̂ᵢ** (shared **w**, **b** sharpen; tanh confidence gate). Step 9 forms **ABDn = tanh(wD ⊙ ABn ⊙ Dn + bD)**. Step 10 polls **v = E @ ABDn**. Steps 11–12: three bottlenecks on **v**, then **ŷ = softmax(W_out v⁽³⁾)**.
+### Step 7 — Confidence gating
 
-## What this repo implements
+**C″ᵢ = tanh(p̂⁺ᵢ · C′ᵢ) + tanh(p̂⁻ᵢ · C′ᵢ)** ∈ ℝ⁶⁴.
 
-| Piece | Status |
-|-------|--------|
-| Part 1 (per mini-model, incl. **ABn**, **M′**, **p̂ᵢ**) | [`perspective_stages.py`](perspective_stages.py) — `Stages1to5` (differs slightly from main (24) on Step 5 wiring; see that module). |
-| Part 2 aggregation (Steps 6–12) | [`apollo/perspective_event_head.py`](apollo/perspective_event_head.py) — `PerspectiveEventHead`, `BottleneckStack`. |
+### Step 8 — Ensemble matrix **E**
 
-The aggregation head expects **C** (N, p), Part 1 votes **p_hat** (N, 2), actor–receiver blend **ABn** (p,), and global context **Dn** (q,) with optional **Linear(q → p)** inside Step 9 when **q ≠ p**.
+Stack rows **C″ᵢ** → **E ∈ ℝᴺˣ⁶⁴** (PDF: **100×64**).
+
+### Step 9 — Situation vector **ABDn**
+
+**ABDn = tanh(wD ⊙ ABn ⊙ Dn + bD)** ∈ ℝ⁶⁴, **shared** **wD, bD ∈ ℝ⁶⁴**.
+
+### Step 10 — Poll
+
+**v = E @ ABDn ∈ ℝᴺ** (equivalent to **ABDn · Eᵀ** as row vectors).
+
+### Step 11 — Bottlenecks (×3)
+
+Each pass: **ℝᴺ → ℝ¹²⁸ → ℝᴺ** with **ReLU**; **independent** **W↑**, **W↓** per pass (no weight sharing between passes). Produces **v⁽³⁾**.
+
+### Step 12 — Final output
+
+**ŷ = softmax(W_out v⁽³⁾ + b_out)**, **ŷ = [ŷ⁺, ŷ⁻]**, **W_out ∈ ℝ²ˣᴺ**.  
+**ŷ⁺**: probability **A** takes the specified action toward **B**; **ŷ⁻** the complement.
+
+---
+
+## End-to-end flow (spec)
+
+1. For each **i**: embed strings → **A, B, Cᵢ, Dᵢ** → **ABn** → **M → M′** → **h** → **p̂ᵢ**.  
+2. Once: **{Cᵢ, p̂ᵢ}** → Steps 6–8 → **E**; **ABn, Dn** → **ABDn** → **v** → bottlenecks → **ŷ**.
+
+---
+
+## Repository layout
+
+| Location | Purpose |
+|----------|---------|
+| **`apollo/`** | Importable package: `perspective_stages`, `predict_from_strings`, `perspective_event_head`, converters, `personality_bank`, `paths` (repo-root paths). |
+| **`scripts/`** | Runnable entry points (training, data builds, `run_full_pipeline.py`). Run from repo root: `python scripts/<name>.py`. |
+| **`tests/`** | `pytest` |
+| **`data/`**, **`entity_embeddings/`**, … | Datasets and trained embedding tables (unchanged locations). |
+
+---
+
+## What this repository implements
+
+| Spec piece | Code | Notes |
+|------------|------|--------|
+| Step 1 embeddings + converters | Artifact dirs at repo root; `apollo/*_minilm_converter.py`; `scripts/train_*_embeddings.py`, `scripts/train_all_converters.py` | MiniLM → 64-d as in the spec. |
+| Step 2 **ABn** | `apollo.perspective_stages.compute_abn` | Matches PDF blend. |
+| Steps 3–5 (per mini-model) | `apollo.perspective_stages.Stages1to5` | **N×N** grid when **N>1**; **Step 5** differs from PDF (**concat head**). Train Part 1 with `scripts/train_perspective_stages.py`. |
+| Part 2 Steps 6–12 | `apollo.perspective_event_head.PerspectiveEventHead` | Matches PDF aggregation; `scripts/train_perspective_event_head.py`, `scripts/build_perspective_event_head_training_data.py`. |
+| **N = 100** personalities | `apollo/personality_bank.py`, `apollo/personalities_100.json` | |
+| Full inference (Part 1 loop + Part 2) | `scripts/run_full_pipeline.py` | Optional `data/perspective_event_head.pt`. |
+| Single-lens API | `apollo.predict_from_strings` | One **N=1** forward. CLI: `python -m apollo.predict_from_strings …`. |
+
+**Gaps vs main (24).pdf**
+
+- **Independent mini-model weights:** The spec requires **100 separate** parameter sets. Training/inference often uses **one** `perspective_stages.pt` with **N=1**, repeated with different **C** — an approximation unless you train **N=100** or per-index checkpoints.
+- **Step 5:** Implementation does not strictly use **M′·ABn** → **softmax**; see `perspective_stages.py`.
+- **sDi per i:** The spec allows a **different context string per mini-model**; `run_full_pipeline.py` typically uses **one** shared context embedding **Dn** for all **i** (valid as a special case).
+
+---
 
 ## Setup
 
@@ -79,28 +132,49 @@ pip install -r requirements.txt
 
 ## Tests
 
+From the **repository root**, `pyproject.toml` sets `pythonpath = ["."]` for pytest:
+
 ```bash
-set PYTHONPATH=.
 python -m pytest tests/ -v
 ```
 
-(On PowerShell: `$env:PYTHONPATH="."`.)
+## Training / data (Part 2)
 
-## Minimal usage
+```bash
+python scripts/build_perspective_event_head_training_data.py --num-samples 100000
+python scripts/train_perspective_event_head.py
+```
+
+Saves `data/perspective_event_head.pt`.
+
+## Inference (full stack)
+
+```bash
+python scripts/run_full_pipeline.py
+python scripts/run_full_pipeline.py --max-personalities 20 --agg-head data/perspective_event_head.pt
+```
+
+The aggregation checkpoint in `data/perspective_event_head.pt` is built for **the same N** as in training (default vault **N = 100**). If you pass `--max-personalities` **K** with **K ≠ N**, either omit a checkpoint (point `--agg-head` at a non-existent path) so Part 2 uses random weights, or use **all** vault personalities so **n** matches the saved head.
+
+## Code: aggregation head only
 
 ```python
 import torch
 from apollo import PerspectiveEventHead
 
-n, p, q = 8, 64, 64
+n, p, q = 100, 64, 64
 head = PerspectiveEventHead(n=n, p=p, q=q)
 C = torch.randn(n, p)
 p_hat = torch.softmax(torch.randn(n, 2), dim=-1)
 abn = torch.randn(p)
 d_n = torch.randn(q)
-y = head(C, p_hat, abn, d_n)  # shape (2,), nonnegative, sums to 1
+y = head(C, p_hat, abn, d_n)  # (2,), nonnegative, sums to 1
+# Training: logits = head.forward_logits(C, p_hat, abn, d_n)
 ```
+
+---
 
 ## Reference
 
-Full notation and intuition: **main (21).pdf** in the project (architecture specification).
+**main (24).pdf** — complete confirmed specification (notation, intuition, diagrams).  
+Earlier drafts (e.g. main (21).pdf) may differ; this README follows **main (24).pdf**.

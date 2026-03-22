@@ -14,10 +14,11 @@ from typing import Union
 import torch
 import torch.nn as nn
 
+from apollo.paths import ENTITY_EMBEDDINGS_DIR as ENTITY_DIR
+
 # MiniLM-L6-v2 output dim
 MINILM_DIM = 384
 ENTITY_DIM = 64
-ENTITY_DIR = Path("entity_embeddings")
 CONVERTER_EPOCHS = 1800
 CONVERTER_LR = 0.001
 

@@ -2,7 +2,7 @@
 Shared personality bank for the N-perspective ensemble.
 
 Vault: personalities_100.json next to this module (100 strings). Regenerate with:
-    python generate_personalities_100.py
+    python scripts/generate_personalities_100.py
 
 N equals the vault size: every string is one mini-model slot (Stages 1–5 independent
 per persona, then Stages 6–8 fuse all N).
@@ -26,7 +26,7 @@ def _load_vault() -> tuple[str, ...]:
     if not _VAULT_PATH.is_file():
         raise FileNotFoundError(
             f"Personality vault missing: {_VAULT_PATH}. "
-            "Run: python generate_personalities_100.py"
+            "Run: python scripts/generate_personalities_100.py"
         )
     with _VAULT_PATH.open(encoding="utf-8") as f:
         data = json.load(f)

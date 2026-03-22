@@ -10,13 +10,20 @@ Triplet thresholds: similarity > pos_threshold → positive, < neg_threshold →
 """
 
 import csv
+import sys
 from collections import defaultdict
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import DATA_DIR
+
 # ── Paths ───────────────────────────────────────────────────────────
-ALLIANCE_CSV = Path("data/alliance_v4.1_by_dyad_yearly.csv")
-TRADE_CSV = Path("data/Dyadic_COW_4.0.csv")
-OUTPUT_FILE = Path("data/entities.txt")
+ALLIANCE_CSV = DATA_DIR / "alliance_v4.1_by_dyad_yearly.csv"
+TRADE_CSV = DATA_DIR / "Dyadic_COW_4.0.csv"
+OUTPUT_FILE = DATA_DIR / "entities.txt"
 
 # ── Alliance type scores (user spec) ────────────────────────────────
 # defense (Type I) → 1.0, neutrality (IIa) → 0.6, nonaggression (IIb) → 0.5, entente (III) → 0.4

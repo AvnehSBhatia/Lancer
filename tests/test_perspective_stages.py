@@ -1,6 +1,6 @@
 import torch
 
-from perspective_stages import Config, build_model, compute_abn
+from apollo.perspective_stages import Config, build_model, compute_abn
 
 
 def test_forward_stage4_abdj_matches_full_forward():

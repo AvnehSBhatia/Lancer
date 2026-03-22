@@ -3,18 +3,27 @@ train_actor_embeddings.py
 
 Loads a list of actor/entity strings (one per line) from a text file,
 assigns each a unique integer ID, trains an embedding table of dim 64,
-and saves the model + the id->string vocabulary to ./actor_embeddings/
+and saves the model + the id->string vocabulary to actor_embeddings/ under the repo root.
 """
 
-import os
 import json
+import os
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import DATA_DIR
+
 # ── Config ────────────────────────────────────────────────────────
-INPUT_FILE  = "data/actors.txt"       # one actor string per line
-OUTPUT_DIR  = "actor_embeddings"
+INPUT_FILE = str(DATA_DIR / "actors.txt")  # one actor string per line
+OUTPUT_DIR = str(_REPO_ROOT / "actor_embeddings")
 EMBED_DIM   = 64
 EPOCHS      = 200
 LR          = 0.01

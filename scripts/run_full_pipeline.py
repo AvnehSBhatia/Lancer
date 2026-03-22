@@ -14,21 +14,27 @@ Weights:
   - ``data/perspective_event_head.pt`` — Part 2 (optional; random init if missing).
 
 Usage (from repo root):
-    python run_full_pipeline.py
-    python run_full_pipeline.py --max-personalities 20
-    python run_full_pipeline.py --agg-head path/to/perspective_event_head.pt
+    python scripts/run_full_pipeline.py
+    python scripts/run_full_pipeline.py --max-personalities 20
+    python scripts/run_full_pipeline.py --agg-head path/to/perspective_event_head.pt
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
 import torch
 
-ROOT = Path(__file__).resolve().parent
-DEFAULT_AGG_HEAD = ROOT / "data" / "perspective_event_head.pt"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import PERSPECTIVE_EVENT_HEAD_PT, REPO_ROOT
+
+DEFAULT_AGG_HEAD = PERSPECTIVE_EVENT_HEAD_PT
 
 P_DIM = 64
 Q_DIM = 64
@@ -75,9 +81,9 @@ def main() -> None:
     args = parser.parse_args()
 
     from apollo.perspective_event_head import PerspectiveEventHead
-    from personality_bank import PERSONALITY_BANK
-    from perspective_stages import compute_abn
-    from predict_from_strings import (
+    from apollo.personality_bank import PERSONALITY_BANK
+    from apollo.perspective_stages import compute_abn
+    from apollo.predict_from_strings import (
         MODEL_PATH,
         _load_model,
         embed_context,
@@ -146,7 +152,7 @@ def main() -> None:
     elapsed = time.perf_counter() - t_start
 
     if not args.quiet:
-        print(f"Working directory: {ROOT}")
+        print(f"Repository root: {REPO_ROOT}")
         print(f"Part 1: {n} forwards (Stages1to5), Part 2: PerspectiveEventHead (main (24).pdf)")
         print("=" * 70)
         for i, pers_str in enumerate(personality):

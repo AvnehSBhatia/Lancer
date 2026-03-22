@@ -7,19 +7,28 @@ e.g.
     United States	United Kingdom	North Korea
 
 Both actors and receivers are looked up from this same table.
-Saves model + vocab to ./entity_embeddings/
+Saves model + vocab to entity_embeddings/ under the repo root.
 """
 
-import os
 import json
+import os
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import DATA_DIR, ENTITY_EMBEDDINGS_DIR
 
 # ── Config ────────────────────────────────────────────────────────
-INPUT_FILE = "data/entities.txt"
-OUTPUT_DIR = "entity_embeddings"
+INPUT_FILE = str(DATA_DIR / "entities.txt")
+OUTPUT_DIR = str(ENTITY_EMBEDDINGS_DIR)
 EMBED_DIM = 64
 EPOCHS = 500
 LR = 0.02

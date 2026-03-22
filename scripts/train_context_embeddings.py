@@ -6,19 +6,28 @@ Each line of contexts.txt is one triplet:
 e.g.
     ongoing civil war	regional instability	post-conflict peace
 
-Saves model + vocab to ./context_embeddings/
+Saves model + vocab to context_embeddings/ under the repo root.
 """
 
-import os
 import json
+import os
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import CONTEXT_EMBEDDINGS_DIR, DATA_DIR
 
 # ── Config ────────────────────────────────────────────────────────
-INPUT_FILE = "data/contexts.txt"
-OUTPUT_DIR = "context_embeddings"
+INPUT_FILE = str(DATA_DIR / "contexts.txt")
+OUTPUT_DIR = str(CONTEXT_EMBEDDINGS_DIR)
 EMBED_DIM = 64
 EPOCHS = 1000
 LR = 0.01

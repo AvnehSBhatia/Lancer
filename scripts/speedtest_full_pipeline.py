@@ -5,13 +5,19 @@ Timing from cold start through 100 full pipeline runs.
 Full pipeline: load embeddings + converters + model, then predict 100 times.
 """
 
+import sys
 import time
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 # Start timer at very beginning
 t_start = time.perf_counter()
 
 # Imports (part of cold start)
-from predict_from_strings import predict
+from apollo.predict_from_strings import predict
 
 # 100 full pipeline runs (first call loads everything; subsequent use cache)
 actor = "United States of America"

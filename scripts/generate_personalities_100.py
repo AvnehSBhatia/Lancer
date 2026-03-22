@@ -12,7 +12,8 @@ import json
 from pathlib import Path
 
 VAULT_SIZE = 100
-OUT = Path(__file__).resolve().parent / "personalities_100.json"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+OUT = _REPO_ROOT / "apollo" / "personalities_100.json"
 
 MODEL_PANEL = [
     "military analyst",

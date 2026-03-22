@@ -1,0 +1,10 @@
+[project]
+name = "apollo"
+version = "0.1.0"
+description = "Perspective-conditioned geopolitical event prediction (Apollo / Lancer)"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

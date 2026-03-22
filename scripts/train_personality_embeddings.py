@@ -6,19 +6,28 @@ Each line of personalities.txt is one triplet:
 e.g.
     military analyst	defense strategist	pacifist activist
 
-Saves model + vocab to ./personality_embeddings/
+Saves model + vocab to personality_embeddings/ under the repo root.
 """
 
-import os
 import json
+import os
+import sys
+from pathlib import Path
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from apollo.paths import DATA_DIR, PERSONALITY_EMBEDDINGS_DIR
 
 # ── Config ────────────────────────────────────────────────────────
-INPUT_FILE = "data/personalities.txt"
-OUTPUT_DIR = "personality_embeddings"
+INPUT_FILE = str(DATA_DIR / "personalities.txt")
+OUTPUT_DIR = str(PERSONALITY_EMBEDDINGS_DIR)
 EMBED_DIM = 64
 EPOCHS = 5000
 LR = 0.01

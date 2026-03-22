@@ -190,6 +190,69 @@ Respond with ONLY a JSON object, no markdown, no explanation:
     }
 
 
+def extrapolate_elaboration(
+    actor: str,
+    receiver: str,
+    context: str,
+    y_plus: float,
+    y_minus: float,
+    region_results: list[dict],
+    *,
+    api_key: Optional[str] = None,
+    model: str = DEFAULT_MODEL,
+) -> str:
+    """
+    Call Featherless AI to extrapolate downstream impacts and elaborate on the prediction.
+
+    region_results: list of {receiver, y_plus, y_minus} for other countries in region.
+    """
+    if OpenAI is None:
+        raise RuntimeError("openai package required. Install with: pip install openai")
+
+    key = api_key or os.environ.get("FEATHERLESS_API_KEY")
+    if not key:
+        raise RuntimeError("Set FEATHERLESS_API_KEY or pass api_key=...")
+
+    client = OpenAI(base_url=FEATHERLESS_BASE_URL, api_key=key)
+
+    region_text = ""
+    if region_results:
+        region_text = "\n".join(
+            f"- {r.get('receiver', '?')}: {r.get('y_plus', 0)*100:.1f}% probability"
+            for r in region_results
+        )
+
+    system = """You are a geopolitical analyst extrapolating downstream impacts from a risk prediction model.
+Given an actor, primary receiver, context, probability outputs, and regional probabilities for neighboring countries,
+write a 3–5 paragraph strategic assessment that:
+1. Interprets the primary prediction and what it implies
+2. Extrapolates likely downstream effects (economic, diplomatic, humanitarian, military)
+3. Identifies regional ripple effects based on the country-level probabilities
+4. Suggests potential inflection points and escalation pathways
+Be analytical, specific, and cite the probability data where relevant."""
+
+    user = f"""Actor: {actor}
+Primary receiver: {receiver}
+Context: {context}
+
+Primary prediction: {y_plus:.1%} probability of action, {y_minus:.1%} probability no action.
+
+Regional downstream probabilities (actor vs other countries in same region):
+{region_text or 'No regional data.'}
+
+Extrapolate the strategic implications and downstream impacts."""
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    )
+    content = (response.model_dump()["choices"][0]["message"]["content"] or "").strip()
+    return content
+
+
 if __name__ == "__main__":
     import argparse
 

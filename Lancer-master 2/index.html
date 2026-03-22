@@ -163,23 +163,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .notif-dot.high{background:var(--red)}
 .notif-dot.critical{background:#ff2020}
 
-/* Analytics Screen */
-#analytics{position:fixed;inset:0;display:none;flex-direction:column;z-index:50;background:var(--bg);padding-top:48px}
-#analytics.active{display:flex;animation:fadeUp .4s ease both}
-.analytics-header{padding:1.2rem 1.5rem .8rem;border-bottom:1px solid var(--border);background:var(--bg-panel)}
-.analytics-header h2{font-family:var(--font-h);font-weight:600;font-size:1rem;color:#fff;letter-spacing:.02em}
-.analytics-header p{font-size:.7rem;color:var(--text-dim);margin-top:.2rem}
-.analytics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1.5rem;padding:2rem;flex:1;overflow-y:auto;align-content:start}
-.analytics-card{background:linear-gradient(180deg,rgba(16,20,30,1) 0%,rgba(10,12,18,1) 100%);border:1px solid rgba(255,255,255,.06);border-top:1px solid rgba(255,255,255,.12);border-radius:6px;padding:1.5rem;display:flex;flex-direction:column;position:relative;transition:all .3s ease;box-shadow:0 8px 32px rgba(0,0,0,.4)}
-.analytics-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:var(--orange);opacity:.3;transition:opacity .3s ease,width .3s ease}
-.analytics-card:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(0,0,0,.6);border-color:rgba(255,255,255,.15)}
-.analytics-card:hover::before{opacity:1;width:4px}
-.analytics-card.full{grid-column:1 / -1}
-.analytics-card h3{font-family:var(--font-h);font-size:.75rem;font-weight:600;color:var(--text-bright);margin-bottom:1rem;letter-spacing:.08em;text-transform:uppercase;padding-left:12px}
-.analytics-card canvas{flex:1;width:100%;min-height:220px}
-.analytics-back-btn{position:absolute;top:12px;right:16px;background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--font-m);font-size:.65rem;padding:.4rem .9rem;cursor:pointer;transition:all .2s;z-index:10;border-radius:999px}
-.analytics-back-btn:hover{color:#fff;border-color:var(--text);background:rgba(255,255,255,.05)}
-
 /* Tactical Overlay */
 .tactical-overlay{position:fixed;inset:0;display:none;z-index:300;align-items:center;justify-content:center}
 .tactical-overlay.active{display:flex}
@@ -228,7 +211,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   <div class="nav-brand">APOLLO</div>
   <div class="nav-links">
     <button class="nav-link active" id="navSim">Simulation</button>
-    <button class="nav-link" id="navAnalytics">Analytics</button>
   </div>
   <div class="nav-status" id="navStatus">Sandbox</div>
 </div>
@@ -314,38 +296,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     </div>
     <button class="ctrl-btn" id="newTheoryBtn">NEW THEORY</button>
     <div class="month-grid" id="monthGrid"></div>
-  </div>
-</div>
-
-<!-- ══════ SCREEN 3: Analytics ══════ -->
-<div id="analytics">
-  <div class="analytics-header" style="position:relative">
-    <h2>Analytics Dashboard</h2>
-    <p>Interactive breakdown of simulation data</p>
-      <button class="analytics-back-btn" id="analyticsBackBtn">← Back to Map</button>
-    </div>
-    <div class="analytics-grid" id="analyticsGrid">
-      
-      <!-- Text Analysis Card -->
-      <div class="analytics-card full">
-        <h3>Strategic AI Analysis</h3>
-        <div id="aiSummaryText" style="color:var(--text-bright);font-size:0.85rem;line-height:1.6;font-family:var(--font-h);padding:0.5rem 0.5rem 1rem">
-          Initializing causal projection synthesis... Please run a simulation.
-        </div>
-      </div>
-
-      <div class="analytics-card">
-        <h3>Event Timeline</h3>
-        <canvas id="chartTimeline"></canvas>
-      </div>
-    <div class="analytics-card">
-      <h3>Severity Distribution</h3>
-      <canvas id="chartSeverity"></canvas>
-    </div>
-    <div class="analytics-card">
-      <h3>Events by Region</h3>
-      <canvas id="chartRegion"></canvas>
-    </div>
   </div>
 </div>
 

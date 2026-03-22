@@ -176,5 +176,34 @@ def predict_region():
     })
 
 
+@app.route("/elaborate", methods=["POST"])
+def elaborate():
+    """Call Featherless AI to extrapolate downstream impacts."""
+    data = request.get_json() or {}
+    actor = (data.get("actor") or "").strip()
+    receiver = (data.get("receiver") or "").strip()
+    context = (data.get("context") or "").strip()
+    y_plus = float(data.get("y_plus", 0.5))
+    y_minus = float(data.get("y_minus", 0.5))
+    region_results = data.get("region") or []
+
+    if not actor or not receiver:
+        return jsonify({"error": "actor and receiver required"}), 400
+
+    try:
+        from generate_summary import extrapolate_elaboration
+        text = extrapolate_elaboration(
+            actor=actor,
+            receiver=receiver,
+            context=context,
+            y_plus=y_plus,
+            y_minus=y_minus,
+            region_results=region_results,
+        )
+        return jsonify({"elaboration": text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

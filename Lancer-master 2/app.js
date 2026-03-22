@@ -37,9 +37,16 @@ const COUNTRY_DATA = [
   {name: "Cuba", code: "CU", numId: "192", region: "Americas", lat: 22, lng: -80}
 ];
 
-// Build a quick lookup: numericId -> COUNTRY_DATA entry
+// Build lookups
 const NUM_TO_COUNTRY = {};
-COUNTRY_DATA.forEach(c => { NUM_TO_COUNTRY[c.numId] = c; });
+const NAME_TO_NUMID = {};
+COUNTRY_DATA.forEach(c => {
+  NUM_TO_COUNTRY[c.numId] = c;
+  NAME_TO_NUMID[c.name] = c.numId;
+});
+NAME_TO_NUMID['US'] = '840';
+NAME_TO_NUMID['USA'] = '840';
+NAME_TO_NUMID['United States of America'] = '840';
 
 /* ═══════════════════════════════════════════════════════
    SimAPI — Backend data layer (Flask sim_api.py)
@@ -62,6 +69,19 @@ const SimAPI = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ actor, receiver, context })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'API error ' + res.status);
+    }
+    return res.json();
+  },
+
+  async elaborate(actor, receiver, context, y_plus, y_minus, region) {
+    const res = await fetch(`${API_BASE}/elaborate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor, receiver, context, y_plus, y_minus, region })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -127,8 +147,32 @@ $('runBtn').addEventListener('click', async () => {
 
   state.predictionResult = result;
   state.theory = `${actor} vs ${receiver}: ${context}`;
-  $('theoryLabel').textContent = state.theory;
+  state.impactByNumId = {};
+  state.impactedCountries = new Set();
+  const addImpact = (name, yPlus, isPrimary) => {
+    const numId = NAME_TO_NUMID[name];
+    if (numId) {
+      state.impactByNumId[numId] = { y_plus: yPlus, primary: !!isPrimary };
+      const c = NUM_TO_COUNTRY[numId];
+      if (c) state.impactedCountries.add(c.code);
+    }
+  };
+  addImpact(receiver, result.primary.y_plus, true);
+  (result.region || []).forEach(r => addImpact(r.receiver, r.y_plus, false));
+  const actorNumId = NAME_TO_NUMID[actor];
+  if (actorNumId) {
+    state.impactByNumId[actorNumId] = { y_plus: 0, primary: false, actor: true };
+    const c = NUM_TO_COUNTRY[actorNumId];
+    if (c) state.impactedCountries.add(c.code);
+  }
+  state.currentEvent = {
+    actor, receiver, context,
+    y_plus: result.primary.y_plus, y_minus: 1 - result.primary.y_plus,
+    primary: result.primary, region: result.region || [],
+    title: `${actor} → ${receiver}`,
+  };
 
+  $('theoryLabel').textContent = state.theory;
   $('intro').classList.add('hidden');
   if (!$('sim').classList.contains('active')) {
     $('sim').classList.add('active');
@@ -141,6 +185,7 @@ $('runBtn').addEventListener('click', async () => {
     const allResults = [result.primary, ...(result.region || [])];
     state.globe.addPredictionLines(result.actor_coords, allResults);
   }
+  if (state.viewMode === '2d') draw2DMap();
 
   $('intelPlaceholder').style.display = 'none';
   $('intelReport').classList.add('active');
@@ -151,7 +196,7 @@ $('runBtn').addEventListener('click', async () => {
   $('intelProb').textContent = Math.round(result.primary.y_plus * 100) + '%';
   $('intelAnalogue').textContent = 'Aggregate from 100 perspectives';
   const effects = (result.region || []).map(r =>
-    `<div class="intel-effect-item"><div class="intel-effect-bar orange"></div><span>${r.receiver}: ${(r.y_plus * 100).toFixed(1)}%</span></div>`
+    `<div class="intel-effect-item"><div class="intel-effect-bar orange"></div><span>${r.receiver}: ${(r.y_plus * 100).toFixed(1)}% (downstream)</span></div>`
   ).join('');
   $('intelEffects').innerHTML = effects || '<div class="intel-effect-item"><span>No other countries in region</span></div>';
 
@@ -293,80 +338,90 @@ function draw2DMap() {
     ctx.stroke();
   }
 
-  // Build set of impacted numeric IDs
-  const impactedNums = new Set();
-  state.impactedCountries.forEach(code => {
-    const c = COUNTRY_DATA.find(d => d.code === code);
-    if (c) impactedNums.add(c.numId);
-  });
+  const impactByNumId = state.impactByNumId || {};
 
-  // Draw all country shapes with realistic tech styling
+  // Draw all country shapes — darker fill by probability
   ctx.lineJoin = 'round';
   worldGeoFeatures.forEach(feature => {
     const fid = String(feature.id);
-    const isImpacted = impactedNums.has(fid);
+    const impact = impactByNumId[fid];
 
-    if (isImpacted) {
-      // Glow and intense borders for impacted areas
-      ctx.shadowColor = 'rgba(233,115,22,0.8)';
-      ctx.shadowBlur = 12 * dpr;
-      drawGeoFeature(ctx, feature.geometry,
-        'rgba(233,115,22,0.15)', 'rgba(255,150,50,0.9)', 0.6 * dpr);
-      ctx.shadowBlur = 0; // reset
+    if (impact) {
+      if (impact.actor) {
+        ctx.shadowColor = 'rgba(59,130,246,0.6)';
+        ctx.shadowBlur = 10 * dpr;
+        drawGeoFeature(ctx, feature.geometry,
+          'rgba(59,130,246,0.12)', 'rgba(96,165,250,0.7)', 0.6 * dpr);
+        ctx.shadowBlur = 0;
+      } else {
+        const p = impact.y_plus;
+        const intensity = Math.min(1, p * 1.2);
+        const isPrimary = impact.primary;
+        const r = isPrimary ? Math.floor(239 + (1 - intensity) * 16) : 233;
+        const g = isPrimary ? Math.floor(68 + (1 - intensity) * 82) : Math.floor(115 + (1 - intensity) * 35);
+        const b = 22;
+        const fillAlpha = 0.08 + intensity * 0.35;
+        const strokeAlpha = 0.5 + intensity * 0.5;
+        ctx.shadowColor = `rgba(233,115,22,${0.3 + intensity * 0.5})`;
+        ctx.shadowBlur = (isPrimary ? 16 : 8) * dpr;
+        drawGeoFeature(ctx, feature.geometry,
+          `rgba(${r},${g},${b},${fillAlpha})`,
+          `rgba(255,${Math.floor(150 + intensity * 50)},50,${strokeAlpha})`,
+          (isPrimary ? 0.9 : 0.5) * dpr);
+        ctx.shadowBlur = 0;
+      }
     } else {
-      // Very sharp, subtle blueprint/satellite tech lines for un-impacted
       drawGeoFeature(ctx, feature.geometry,
-        'rgba(255,255,255,0.02)', 'rgba(255,255,255,0.15)', 0.3 * dpr);
+        'rgba(255,255,255,0.02)', 'rgba(255,255,255,0.12)', 0.3 * dpr);
     }
   });
 
-  // Connection arcs between impacted countries
-  const impactedList = COUNTRY_DATA.filter(c => state.impactedCountries.has(c.code));
-  if (impactedList.length >= 2) {
-    ctx.strokeStyle = 'rgba(233,115,22,0.5)';
-    ctx.lineWidth = 2.5 * dpr;
-    ctx.setLineDash([8 * dpr, 5 * dpr]);
-    for (let i = 0; i < impactedList.length; i++) {
-      for (let j = i + 1; j < impactedList.length; j++) {
-        const ax = projX(impactedList[i].lng), ay = projY(impactedList[i].lat);
-        const bx = projX(impactedList[j].lng), by = projY(impactedList[j].lat);
-        const cx = (ax + bx) / 2;
-        const cy = Math.min(ay, by) - 25 * dpr;
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.quadraticCurveTo(cx, cy, bx, by);
-        ctx.stroke();
-      }
-    }
+  // Connection arcs from actor to each impacted receiver
+  const pred = state.predictionResult;
+  if (pred?.actor_coords) {
+    const actor = pred.actor_coords;
+    const receivers = [pred.primary, ...(pred.region || [])];
+    receivers.forEach(r => {
+      const intensity = Math.min(1, r.y_plus * 1.2);
+      const color = intensity > 0.65 ? '239,68,68' : intensity > 0.5 ? '245,158,11' : '34,197,94';
+      ctx.strokeStyle = `rgba(${color},${0.4 + intensity * 0.4})`;
+      ctx.lineWidth = (r === pred.primary ? 2.5 : 1.5) * dpr;
+      ctx.setLineDash(r === pred.primary ? [] : [6 * dpr, 4 * dpr]);
+      const ax = projX(actor.lng), ay = projY(actor.lat);
+      const bx = projX(r.lng), by = projY(r.lat);
+      const cx = (ax + bx) / 2, cy = Math.min(ay, by) - 20 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.quadraticCurveTo(cx, cy, bx, by);
+      ctx.stroke();
+    });
     ctx.setLineDash([]);
   }
 
-  // Event dots
-  state.allEvents.forEach(evt => {
-    const ex = projX(evt.lng), ey = projY(evt.lat);
-    const colors = { critical: '#EF4444', high: '#F59E0B', medium: '#3B82F6', low: '#22C55E' };
-    const color = colors[evt.severity] || '#3B82F6';
-
-    const grad = ctx.createRadialGradient(ex, ey, 0, ex, ey, 14 * dpr);
-    grad.addColorStop(0, color + '60');
-    grad.addColorStop(0.6, color + '20');
-    grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(ex, ey, 14 * dpr, 0, Math.PI * 2); ctx.fill();
-
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(ex, ey, 3 * dpr, 0, Math.PI * 2); ctx.fill();
-
-    // Outer ring
-    ctx.strokeStyle = color + '40';
-    ctx.lineWidth = 1 * dpr;
-    ctx.beginPath(); ctx.arc(ex, ey, 6 * dpr, 0, Math.PI * 2); ctx.stroke();
-  });
+  // Impact dots on receiver countries
+  if (pred?.actor_coords) {
+    [pred.primary, ...(pred.region || [])].forEach(r => {
+      const ex = projX(r.lng), ey = projY(r.lat);
+      const intensity = Math.min(1, r.y_plus * 1.2);
+      const color = intensity > 0.65 ? '#EF4444' : intensity > 0.5 ? '#F59E0B' : '#22C55E';
+      const grad = ctx.createRadialGradient(ex, ey, 0, ex, ey, 18 * dpr);
+      grad.addColorStop(0, color + '50');
+      grad.addColorStop(0.6, color + '15');
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(ex, ey, 18 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(ex, ey, 4 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = color + '60';
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath(); ctx.arc(ex, ey, 7 * dpr, 0, Math.PI * 2); ctx.stroke();
+    });
+  }
 
   // Country labels
   COUNTRY_DATA.forEach(c => {
     const px = projX(c.lng), py = projY(c.lat);
-    const isImpacted = state.impactedCountries.has(c.code);
+    const isImpacted = state.impactedCountries?.has(c.code);
 
     // Small dot at centroid
     ctx.fillStyle = isImpacted ? '#E97316' : 'rgba(255,255,255,0.25)';
@@ -575,24 +630,41 @@ if (tacClose) tacClose.addEventListener('click', () => $('tacticalOverlay').clas
 const tacOverlay = $('tacticalOverlay');
 if (tacOverlay) tacOverlay.addEventListener('click', (ev) => { if (ev.target === tacOverlay) tacOverlay.classList.remove('active'); });
 
-/* ── ELABORATE FINDINGS ── */
+/* ── ELABORATE FINDINGS (Featherless AI) ── */
 const btnElaborate = $('intelElaborate');
 if (btnElaborate) {
-  btnElaborate.addEventListener('click', () => {
-    if (state.currentEvent) {
-      // Find elements in tactical overlay
-      const tacTitle = document.querySelector('.tactical-header h2');
-      const tacMeta = document.querySelector('.tac-meta');
-      const tacTitleMain = document.querySelector('.tac-title');
-      const tacDesc = document.querySelector('.tac-desc');
-      
-      if (tacTitle) tacTitle.textContent = 'Strategic Assessment';
+  btnElaborate.addEventListener('click', async () => {
+    const evt = state.currentEvent;
+    if (!evt) return;
+
+    const tacTitle = document.querySelector('.tactical-header h2');
+    const tacMeta = document.querySelector('.tac-meta');
+    const tacTitleMain = document.querySelector('.tac-title');
+    const tacDesc = document.querySelector('.tac-desc');
+
+    if (tacTitle) tacTitle.textContent = 'Strategic Assessment';
+    if (tacMeta) tacMeta.textContent = 'Extrapolating with Featherless AI...';
+    if (tacTitleMain) tacTitleMain.textContent = evt.title;
+    if (tacDesc) tacDesc.textContent = 'Loading AI elaboration...';
+    $('tacticalOverlay').classList.add('active');
+
+    btnElaborate.disabled = true;
+    try {
+      const res = await SimAPI.elaborate(
+        evt.actor,
+        evt.receiver,
+        evt.context || '',
+        evt.y_plus ?? evt.primary?.y_plus ?? 0.5,
+        evt.y_minus ?? (1 - (evt.primary?.y_plus ?? 0.5)),
+        evt.region || []
+      );
+      if (tacDesc) tacDesc.textContent = res.elaboration || 'No elaboration returned.';
       if (tacMeta) tacMeta.textContent = `REF: AP-${Math.floor(Math.random()*9000)+1000}`;
-      if (tacTitleMain) tacTitleMain.textContent = state.currentEvent.title;
-      if (tacDesc) tacDesc.textContent = state.currentEvent.reasoning || state.currentEvent.description || 'Comprehensive analysis indicates escalating multi-domain consequences spanning regional supply chains, diplomatic networks, and emergent technological paradigms.';
-      
-      $('tacticalOverlay').classList.add('active');
+    } catch (e) {
+      if (tacDesc) tacDesc.textContent = `Error: ${e.message}. Ensure FEATHERLESS_API_KEY is set and sim_api.py is running.`;
+      if (tacMeta) tacMeta.textContent = 'Elaboration failed';
     }
+    btnElaborate.disabled = false;
   });
 }
 
@@ -660,7 +732,6 @@ $('newTheoryBtn')?.addEventListener('click', () => {
   $('notifTickerInner').innerHTML = '';
   $('intelReport').classList.remove('active');
   $('intelPlaceholder').style.display = '';
-  $('analytics').classList.remove('active');
   if (typeof switchView === 'function') switchView('3d');
   setTimeout(() => $('intro').classList.remove('hidden'), 100);
 });
@@ -684,317 +755,5 @@ function setActiveNav(id) {
 
 $('navSim').addEventListener('click', () => {
   setActiveNav('navSim');
-  $('analytics').classList.remove('active');
 });
-
-$('navAnalytics').addEventListener('click', () => {
-  setActiveNav('navAnalytics');
-  $('analytics').classList.add('active');
-  renderAnalytics();
-});
-
-$('analyticsBackBtn')?.addEventListener('click', () => {
-  setActiveNav('navSim');
-  $('analytics').classList.remove('active');
-});
-
-/* ═══════════════════════════════════════════
-   ANALYTICS — Simple interactive canvas charts
-   ═══════════════════════════════════════════ */
-function renderAnalytics() {
-  updateTextAnalysis();
-  renderTimelineChart();
-  renderSeverityChart();
-  renderRegionChart();
-}
-
-function updateTextAnalysis() {
-  const el = $('aiSummaryText');
-  if (!el) return;
-
-  if (state.allEvents.length === 0) {
-    el.innerHTML = 'Initializing causal projection synthesis... Please run a simulation to aggregate data.';
-    return;
-  }
-
-  const critical = state.allEvents.filter(e => e.severity === 'critical').length;
-  const high = state.allEvents.filter(e => e.severity === 'high').length;
-  
-  const regions = {};
-  state.allEvents.forEach(e => { regions[e.region] = (regions[e.region] || 0) + 1; });
-  const topRegion = Object.keys(regions).sort((a,b) => regions[b] - regions[a])[0] || 'Unknown';
-
-  let text = `<span style="color: var(--orange)">STRATEGIC OVERVIEW:</span> The simulation has registered <b>${state.allEvents.length}</b> significant events. `;
-  
-  if (critical > 0) {
-    text += `Escalation vectors are severe, with <b style="color: var(--red)">${critical} critical inflection points</b> threatening immediate structural stability. `;
-  } else if (high > 0) {
-    text += `Tension is elevated, recording <b>${high} high-severity events</b> that require close monitoring. `;
-  } else {
-    text += `Current conditions remain largely stable, with minimal high-impact destabilizers detected. `;
-  }
-
-  text += `The primary epicenter of disruption is currently polarized around <b>${topRegion.toUpperCase()}</b>. `;
-  text += `<br><br><span style="color: var(--text-dim); font-size: 0.75rem;">RECOMMENDATION: Immediate diplomatic intervention advised focusing on ${topRegion} trade corridors to mitigate downstream cascading failure.</span>`;
-
-  el.innerHTML = text;
-}
-
-function setupCanvas(id) {
-  const canvas = $(id);
-  const parent = canvas.parentElement;
-  const dpr = window.devicePixelRatio || 1;
-  const w = parent.clientWidth;
-  const h = Math.max(180, parent.clientHeight - 30);
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + 'px';
-  canvas.style.height = h + 'px';
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  return { ctx, w, h };
-}
-
-function renderTimelineChart() {
-  const { ctx, w, h } = setupCanvas('chartTimeline');
-  ctx.clearRect(0, 0, w, h);
-
-  // Group events by year
-  const yearCounts = {};
-  state.allEvents.forEach(e => {
-    const y = e.year;
-    yearCounts[y] = (yearCounts[y] || 0) + 1;
-  });
-
-  const years = Object.keys(yearCounts).sort((a,b) => a - b);
-  if (years.length === 0) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '13px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Run a simulation to see data', w/2, h/2);
-    return;
-  }
-
-  const maxVal = Math.max(...Object.values(yearCounts), 1);
-  const pad = { top: 20, right: 20, bottom: 30, left: 40 };
-  const chartW = w - pad.left - pad.right;
-  const chartH = h - pad.top - pad.bottom;
-  const barW = Math.min(30, chartW / years.length - 4);
-
-  // Grid lines
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 2]);
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.top + (i / 4) * chartH;
-    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
-  }
-  ctx.setLineDash([]); // reset
-
-  // Bars
-  years.forEach((yr, i) => {
-    const x = pad.left + (i / years.length) * chartW + (chartW / years.length - barW) / 2;
-    const barH = (yearCounts[yr] / maxVal) * chartH;
-    const y = pad.top + chartH - barH;
-
-    // Track Background
-    ctx.fillStyle = 'rgba(255,255,255,0.02)';
-    ctx.beginPath();
-    ctx.roundRect(x, pad.top, barW, chartH, 4);
-    ctx.fill();
-
-    // Bar Fill
-    const grad = ctx.createLinearGradient(x, y, x, y + barH);
-    grad.addColorStop(0, 'rgba(233,115,22,0.9)');
-    grad.addColorStop(1, 'rgba(233,115,22,0.2)');
-    ctx.fillStyle = grad;
-    
-    ctx.beginPath();
-    ctx.roundRect(x, y, barW, barH, [4, 4, 0, 0]);
-    ctx.fill();
-
-    // Year label
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '9px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(yr, x + barW/2, h - pad.bottom + 16);
-
-    // Value Badge
-    if (yearCounts[yr] > 0) {
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.font = '600 9px IBM Plex Mono, monospace';
-      ctx.fillText(yearCounts[yr], x + barW/2, y - 6);
-    }
-  });
-
-  // Axis labels
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '9px IBM Plex Sans, sans-serif';
-  ctx.textAlign = 'right';
-  for (let i = 0; i <= 4; i++) {
-    const val = Math.round(maxVal * (1 - i/4));
-    ctx.fillText(val, pad.left - 6, pad.top + (i/4) * chartH + 3);
-  }
-
-  // Hover tooltip
-  const canvas = $('chartTimeline');
-  canvas.onmousemove = (ev) => {
-    const rect = canvas.getBoundingClientRect();
-    const mx = ev.clientX - rect.left;
-    years.forEach((yr, i) => {
-      const x = pad.left + (i / years.length) * chartW + (chartW / years.length - barW) / 2;
-      if (mx >= x && mx <= x + barW) {
-        canvas.title = `Year ${yr}: ${yearCounts[yr]} events`;
-      }
-    });
-  };
-}
-
-function renderSeverityChart() {
-  const { ctx, w, h } = setupCanvas('chartSeverity');
-  ctx.clearRect(0, 0, w, h);
-
-  const counts = { low: 0, medium: 0, high: 0, critical: 0 };
-  state.allEvents.forEach(e => { counts[e.severity] = (counts[e.severity] || 0) + 1; });
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
-
-  if (total === 0) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '13px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No data yet', w/2, h/2);
-    return;
-  }
-
-  const colors = { low: '#22C55E', medium: '#3B82F6', high: '#F59E0B', critical: '#EF4444' };
-  const labels = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
-  const cx = w * 0.35, cy = h / 2, radius = Math.min(w * 0.28, h * 0.38);
-  let angle = -Math.PI / 2;
-
-  Object.entries(counts).forEach(([sev, count]) => {
-    if (count === 0) return;
-    const slice = (count / total) * Math.PI * 2;
-    
-    // Draw slice with gap
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, radius, angle, angle + slice);
-    ctx.closePath();
-    ctx.fillStyle = colors[sev];
-    ctx.fill();
-    
-    // Gap stroke matching bg gradient
-    ctx.strokeStyle = '#0e121a';
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    
-    angle += slice;
-  });
-
-  // Inner punchout for donut
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius * 0.65, 0, Math.PI * 2);
-  ctx.fillStyle = '#0e121a';
-  ctx.fill();
-
-  // Total in center
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 24px IBM Plex Sans, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(total, cx, cy + 6);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '600 9px IBM Plex Sans, sans-serif';
-  ctx.letterSpacing = '1px';
-  ctx.fillText('EVENTS', cx, cy + 20);
-  ctx.letterSpacing = '0px';
-
-  // Elegant Legend
-  let ly = (h / 2) - ((Object.values(counts).filter(c=>c>0).length * 28) / 2) + 10;
-  Object.entries(counts).forEach(([sev, count]) => {
-    if (count === 0) return;
-    
-    // Dot indicator
-    ctx.beginPath();
-    ctx.arc(w * 0.68, ly - 4, 4, 0, Math.PI * 2);
-    ctx.fillStyle = colors[sev];
-    ctx.fill();
-    
-    // Label
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '11px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${labels[sev]}`, w * 0.68 + 14, ly);
-    
-    // Count Badge
-    ctx.fillStyle = '#fff';
-    ctx.font = '600 11px IBM Plex Mono, monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(count.toString().padStart(2, '0'), w - 24, ly);
-    
-    ly += 26;
-  });
-}
-
-function renderRegionChart() {
-  const { ctx, w, h } = setupCanvas('chartRegion');
-  ctx.clearRect(0, 0, w, h);
-
-  const regionCounts = {};
-  state.allEvents.forEach(e => {
-    regionCounts[e.region] = (regionCounts[e.region] || 0) + 1;
-  });
-
-  const sorted = Object.entries(regionCounts).sort((a,b) => b[1] - a[1]);
-  if (sorted.length === 0) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '13px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No data yet', w/2, h/2);
-    return;
-  }
-
-  const maxVal = sorted[0][1] || 1;
-  const pad = { top: 20, right: 30, bottom: 20, left: 110 };
-  const chartW = w - pad.left - pad.right;
-  const barH = Math.min(18, (h - pad.top - pad.bottom) / sorted.length - 8);
-
-  sorted.forEach(([region, count], i) => {
-    const y = pad.top + i * (barH + 12);
-    const bw = (count / maxVal) * chartW;
-
-    // Track Background (Subtle)
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.beginPath();
-    ctx.roundRect(pad.left, y, chartW, barH, 4);
-    ctx.fill();
-
-    // Bar Fill
-    const grad = ctx.createLinearGradient(pad.left, y, pad.left + bw, y);
-    grad.addColorStop(0, 'rgba(59,130,246,0.8)');
-    grad.addColorStop(1, 'rgba(59,130,246,0.3)');
-    ctx.fillStyle = grad;
-    
-    // Draw with rounded right edge
-    ctx.beginPath();
-    if(bw > 0) ctx.roundRect(pad.left, y, bw, barH, 4);
-    ctx.fill();
-
-    // Label
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.font = '11px IBM Plex Sans, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(region.toUpperCase(), pad.left - 12, y + barH / 2 + 4);
-
-    // Value Badge
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.beginPath();
-    ctx.roundRect(pad.left + bw + 10, y - 2, 28, barH + 4, 3);
-    ctx.fill();
-    
-    ctx.fillStyle = '#fff';
-    ctx.font = '600 11px IBM Plex Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(count.toString().padStart(2, '0'), pad.left + bw + 24, y + barH / 2 + 4);
-  });
-}
 
